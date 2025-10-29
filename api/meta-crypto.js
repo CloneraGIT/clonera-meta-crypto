@@ -2,7 +2,9 @@ import crypto from "crypto";
 import fetch from "node-fetch";
 
 const N8N_WEBHOOK = "https://cloneratriage.app.n8n.cloud/webhook/meta-flow";
-const PRIVATE_KEY = `-----BEGIN RSA PRIVATE KEY-----
+
+const PRIVATE_KEY = `
+-----BEGIN RSA PRIVATE KEY-----
 MIIEpAIBAAKCAQEAsGZd7eG9SNbzBX6kUYrbai4QI0rSWKAYyayBHQ3haJg5kbGj
 wVbsZsshR/pm8Qs+krLE5IH+hdrdwB0wwoSvHkuJadBICBoOfHi3aurQy8YGW3QA
 Ln2OvCEKP1CtILsOlLrwnOrNitCEw5rnDJYd5Eu0H4NteOaum/5XpTa2O6bhqsV6
@@ -28,26 +30,25 @@ qW5MxV1eu0bCM8sCguY4gH/MDLsf1xcz/xagK0GEZkCg0B2ZgDrB/ypNnb7eAb38
 325ZUQKBgQDlQ5bJ2KvwUaQHnyMZOfc6KABBZ+OtHEivNdWsk63VrOF45F93DNCq
 cv5KljwngtH6630vCiFe5Lb3FVcGuLGN8RaDQn2PYwmFfc28mxUQE9vCLryECH+A
 YFkQhsMcqx9mlV6gvbsOXlZEELjuU7EzAzzCnGSyxofq4/VDTSNfBA==
------END RSA PRIVATE KEY-----`;
+-----END RSA PRIVATE KEY-----
+`;
 
 export default async function handler(req, res) {
   try {
     const body = req.body || {};
 
-    // --- 🩺 Meta health check handling ---
+    // 🩺 Handle Meta Health Check or empty keys
     if (
-      !body.encrypted_flow_data ||
       !body.encrypted_aes_key ||
-      !body.initial_vector
+      body.encrypted_aes_key.length < 50 // less than 50 chars = not a real RSA block
     ) {
       console.log("Received Meta Health Check - responding OK");
 
-      // Base64-encoded confirmation
       const response = {
         encrypted_flow_data: Buffer.from(
           JSON.stringify({
             success: true,
-            message: "Clonera Meta Webhook active and healthy",
+            message: "Clonera Meta endpoint active and healthy ✅",
             timestamp: new Date().toISOString(),
           })
         ).toString("base64"),
@@ -58,7 +59,7 @@ export default async function handler(req, res) {
       return res.status(200).json(response);
     }
 
-    // --- 🔐 Normal encrypted flow handling ---
+    // 🔐 If real encrypted data, proceed
     const encryptedAESKey = Buffer.from(body.encrypted_aes_key, "base64");
     const aesKey = crypto.privateDecrypt(
       { key: PRIVATE_KEY, padding: crypto.constants.RSA_PKCS1_OAEP_PADDING },
@@ -72,7 +73,7 @@ export default async function handler(req, res) {
     decrypted = Buffer.concat([decrypted, decipher.final()]);
     const payload = JSON.parse(decrypted.toString("utf8"));
 
-    console.log("Decrypted payload:", payload);
+    console.log("✅ Decrypted payload:", payload);
 
     // Forward to n8n
     const n8nResponse = await fetch(N8N_WEBHOOK, {
@@ -82,7 +83,7 @@ export default async function handler(req, res) {
     });
     const result = await n8nResponse.json();
 
-    // Re-encrypt response
+    // Re-encrypt for Meta
     const ivOut = crypto.randomBytes(16);
     const cipher = crypto.createCipheriv("aes-128-cbc", aesKey, ivOut);
     let encrypted = cipher.update(JSON.stringify(result));
@@ -101,7 +102,7 @@ export default async function handler(req, res) {
       encrypted_flow_data: Buffer.from(
         JSON.stringify({
           success: true,
-          message: "Clonera Meta Webhook active (health fallback)",
+          message: "Clonera Meta Webhook healthy (OAEP fallback)",
           timestamp: new Date().toISOString(),
         })
       ).toString("base64"),
