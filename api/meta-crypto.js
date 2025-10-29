@@ -85,13 +85,11 @@ export default async function handler(req, res) {
       const base64Binary = Buffer.from(JSON.stringify(payload), "utf8").toString("base64");
 
       res.setHeader("Content-Type", "application/json");
-      return res.status(200).send(
-        JSON.stringify({
-          encrypted_flow_data: base64Binary,
-          encrypted_aes_key: "",
-          initial_vector: "",
-        })
-      );
+return res.status(200).json({
+  encrypted_flow_data: base64Binary,
+  encrypted_aes_key: "",
+  initial_vector: "",
+});
     }
 
     // === DECRYPT PAYLOAD ===
