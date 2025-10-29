@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import fetch from "node-fetch";
 
+// === CONFIG ===
 const N8N_WEBHOOK = "https://cloneratriage.app.n8n.cloud/webhook/meta-flow";
 
 const PRIVATE_KEY = `
@@ -37,28 +38,36 @@ export default async function handler(req, res) {
   try {
     const body = req.body || {};
 
-    // --- Detect Meta health check or invalid encryption ---
+    // === HEALTH CHECK / INVALID ENCRYPTION CASE ===
     if (
       !body.encrypted_aes_key ||
-      body.encrypted_aes_key.length < 100 || // shorter than a real RSA block
+      body.encrypted_aes_key.length < 100 ||
       !body.encrypted_flow_data
     ) {
-      console.log("Meta health check detected — sending Base64 OK");
+      console.log("Meta health check detected — sending Base64 binary OK");
+
+      // Simple JSON payload for Meta
       const payload = {
         success: true,
         message: "Clonera Meta endpoint active and verified ✅",
         timestamp: new Date().toISOString(),
       };
 
-      const encoded = Buffer.from(JSON.stringify(payload)).toString("base64");
-      return res.status(200).json({
-        encrypted_flow_data: encoded,
-        encrypted_aes_key: "",
-        initial_vector: "",
-      });
+      // Encode payload as proper Base64 binary (UTF-8)
+      const base64Binary = Buffer.from(JSON.stringify(payload), "utf8").toString("base64");
+
+      // Respond with correct format
+      res.setHeader("Content-Type", "application/json");
+      return res.status(200).send(
+        JSON.stringify({
+          encrypted_flow_data: base64Binary,
+          encrypted_aes_key: "",
+          initial_vector: "",
+        })
+      );
     }
 
-    // --- Try decrypting AES key ---
+    // === ATTEMPT DECRYPTION (REAL FLOW CASE) ===
     let aesKey;
     try {
       const encryptedAESKey = Buffer.from(body.encrypted_aes_key, "base64");
@@ -73,15 +82,19 @@ export default async function handler(req, res) {
         message: "Meta health probe acknowledged ✅",
         timestamp: new Date().toISOString(),
       };
-      const encoded = Buffer.from(JSON.stringify(payload)).toString("base64");
-      return res.status(200).json({
-        encrypted_flow_data: encoded,
-        encrypted_aes_key: "",
-        initial_vector: "",
-      });
+      const base64Binary = Buffer.from(JSON.stringify(payload), "utf8").toString("base64");
+
+      res.setHeader("Content-Type", "application/json");
+      return res.status(200).send(
+        JSON.stringify({
+          encrypted_flow_data: base64Binary,
+          encrypted_aes_key: "",
+          initial_vector: "",
+        })
+      );
     }
 
-    // --- Decrypt payload (for real messages) ---
+    // === DECRYPT PAYLOAD ===
     const iv = Buffer.from(body.initial_vector, "base64");
     const data = Buffer.from(body.encrypted_flow_data, "base64");
     const decipher = crypto.createDecipheriv("aes-128-cbc", aesKey, iv);
@@ -90,7 +103,7 @@ export default async function handler(req, res) {
     const payload = JSON.parse(decrypted.toString("utf8"));
     console.log("Decrypted payload:", payload);
 
-    // --- Forward to n8n ---
+    // === FORWARD TO N8N ===
     const n8nResponse = await fetch(N8N_WEBHOOK, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -98,7 +111,7 @@ export default async function handler(req, res) {
     });
     const result = await n8nResponse.json();
 
-    // --- Re-encrypt response ---
+    // === RE-ENCRYPT RESPONSE ===
     const ivOut = crypto.randomBytes(16);
     const cipher = crypto.createCipheriv("aes-128-cbc", aesKey, ivOut);
     let encrypted = cipher.update(JSON.stringify(result));
@@ -110,7 +123,8 @@ export default async function handler(req, res) {
       initial_vector: ivOut.toString("base64"),
     };
 
-    return res.status(200).json(encryptedResponse);
+    res.setHeader("Content-Type", "application/json");
+    return res.status(200).send(JSON.stringify(encryptedResponse));
   } catch (err) {
     console.error("Unexpected error:", err);
     const fallback = Buffer.from(
@@ -118,12 +132,17 @@ export default async function handler(req, res) {
         success: true,
         message: "Fallback OK response (no encryption)",
         timestamp: new Date().toISOString(),
-      })
+      }),
+      "utf8"
     ).toString("base64");
-    return res.status(200).json({
-      encrypted_flow_data: fallback,
-      encrypted_aes_key: "",
-      initial_vector: "",
-    });
+
+    res.setHeader("Content-Type", "application/json");
+    return res.status(200).send(
+      JSON.stringify({
+        encrypted_flow_data: fallback,
+        encrypted_aes_key: "",
+        initial_vector: "",
+      })
+    );
   }
 }
