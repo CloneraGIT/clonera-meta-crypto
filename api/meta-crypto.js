@@ -53,18 +53,19 @@ export default async function handler(req, res) {
         timestamp: new Date().toISOString(),
       };
 
-      // Encode payload as proper Base64 binary (UTF-8)
-      const base64Binary = Buffer.from(JSON.stringify(payload), "utf8").toString("base64");
+      // Encode payload as strict one-line Base64 (no newlines, no spaces)
+      const base64Binary = Buffer.from(JSON.stringify(payload), "utf8")
+        .toString("base64")
+        .replace(/(\r\n|\n|\r)/gm, "")
+        .trim();
 
-      // Respond with correct format
+      // Respond in the exact format Meta expects
       res.setHeader("Content-Type", "application/json");
-      return res.status(200).send(
-        JSON.stringify({
-          encrypted_flow_data: base64Binary,
-          encrypted_aes_key: "",
-          initial_vector: "",
-        })
-      );
+      return res.status(200).json({
+        encrypted_flow_data: base64Binary,
+        encrypted_aes_key: "",
+        initial_vector: "",
+      });
     }
 
     // === ATTEMPT DECRYPTION (REAL FLOW CASE) ===
@@ -76,20 +77,28 @@ export default async function handler(req, res) {
         encryptedAESKey
       );
     } catch (keyErr) {
-      console.warn("Invalid AES key – treating as Meta health check:", keyErr.message);
+      console.warn(
+        "Invalid AES key – treating as Meta health check:",
+        keyErr.message
+      );
+
       const payload = {
         success: true,
         message: "Meta health probe acknowledged ✅",
         timestamp: new Date().toISOString(),
       };
-      const base64Binary = Buffer.from(JSON.stringify(payload), "utf8").toString("base64");
+
+      const base64Binary = Buffer.from(JSON.stringify(payload), "utf8")
+        .toString("base64")
+        .replace(/(\r\n|\n|\r)/gm, "")
+        .trim();
 
       res.setHeader("Content-Type", "application/json");
-return res.status(200).json({
-  encrypted_flow_data: base64Binary,
-  encrypted_aes_key: "",
-  initial_vector: "",
-});
+      return res.status(200).json({
+        encrypted_flow_data: base64Binary,
+        encrypted_aes_key: "",
+        initial_vector: "",
+      });
     }
 
     // === DECRYPT PAYLOAD ===
@@ -122,9 +131,10 @@ return res.status(200).json({
     };
 
     res.setHeader("Content-Type", "application/json");
-    return res.status(200).send(JSON.stringify(encryptedResponse));
+    return res.status(200).json(encryptedResponse);
   } catch (err) {
     console.error("Unexpected error:", err);
+
     const fallback = Buffer.from(
       JSON.stringify({
         success: true,
@@ -132,15 +142,16 @@ return res.status(200).json({
         timestamp: new Date().toISOString(),
       }),
       "utf8"
-    ).toString("base64");
+    )
+      .toString("base64")
+      .replace(/(\r\n|\n|\r)/gm, "")
+      .trim();
 
     res.setHeader("Content-Type", "application/json");
-    return res.status(200).send(
-      JSON.stringify({
-        encrypted_flow_data: fallback,
-        encrypted_aes_key: "",
-        initial_vector: "",
-      })
-    );
+    return res.status(200).json({
+      encrypted_flow_data: fallback,
+      encrypted_aes_key: "",
+      initial_vector: "",
+    });
   }
 }
